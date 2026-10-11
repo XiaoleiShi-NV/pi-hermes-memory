@@ -98,7 +98,7 @@ jobs:
           # A prerelease published through the GitHub Releases UI has no inputs to
           # read, so its dist-tag defaults to next instead of latest.
           dist_tag="${INPUT_DIST_TAG:-latest}"
-          if [ "$EVENT_NAME" = "release" ] && [ "${RELEASE_PRERELEASE:-false}" = "true" ]; then
+          if [ "${EVENT_NAME:-}" = "release" ] && [ "${RELEASE_PRERELEASE:-false}" = "true" ]; then
             dist_tag="next"
           fi
           {
