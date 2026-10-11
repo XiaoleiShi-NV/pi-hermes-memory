@@ -6,7 +6,7 @@
 
 |Workflow|Trigger|Job|
 |---|---|---|
-|`publish.yml`|push of a `v*` tag, `workflow_dispatch`, or a call from `release.yml`|verify → publish to npm → GitHub Release|
+|`publish.yml`|push of a `v*` tag, publishing a GitHub Release, `workflow_dispatch`, or a call from `release.yml`|verify → publish to npm → GitHub Release|
 |`release.yml`|`workflow_dispatch`|bump `package.json`, promote `CHANGELOG.md`, commit to `main`, push the tag, then call `publish.yml`|
 
 Both run on `ubuntu-latest`. See [Runners](#runners) for why.
@@ -91,6 +91,20 @@ git push origin v0.9.11
 ```
 
 The tag must match `package.json` exactly, or `verify` fails.
+
+### Release-first: the GitHub Release is the trigger
+
+Publishing a GitHub Release also starts the pipeline (`release: types: [published]`), which is npm's own documented pattern — write the notes in the GitHub UI, hit **Publish release**, and npm publish follows. The tag comes from the release, so the tag↔version guard still applies.
+
+**The tradeoff is ordering.** In this path the Release page is public *before* the package is installable. If the publish then fails, the release advertises a version npm does not have until you re-dispatch. The tag-first paths keep the stronger invariant: a release exists only once the package is live on npm.
+
+Both orderings are safe to combine, because the pipeline is idempotent:
+
+- Whichever signal arrives second cannot double-publish — `verify` stops on an already-published version.
+- A release you wrote by hand keeps its own notes: the `release` job finds it and leaves it untouched rather than overwriting it with the `CHANGELOG.md` section.
+- A release created by our own workflow uses `GITHUB_TOKEN`, which cascades nothing, so it cannot re-trigger this workflow.
+
+Prereleases published through the Releases UI default to the `next` dist-tag. A tag push or dispatch has no such context and must name it explicitly.
 
 ### Re-run, backport or dry-run
 

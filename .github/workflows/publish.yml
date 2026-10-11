@@ -1,13 +1,19 @@
 name: Publish to npm
 
-# Three entry points, all converging on the same jobs:
-#   * push a version tag (v0.9.11)  — the normal release path
+# Four entry points, all converging on the same jobs:
+#   * push a version tag (v0.9.11)  — tag-first release
+#   * publish a GitHub Release      — release-first release (npm's documented pattern)
 #   * workflow_dispatch             — re-run, backport, dry-run, staged publish
 #   * workflow_call                 — used by "Prepare release" so a release is one dispatch
+#
+# A Release created by this workflow's own `release` job uses GITHUB_TOKEN, which
+# cascades nothing, so the `release` trigger cannot re-enter itself.
 on:
   push:
     tags:
       - "v*"
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       ref:
@@ -76,6 +82,8 @@ jobs:
           INPUT_STAGE: ${{ inputs.stage }}
           INPUT_DRY_RUN: ${{ inputs.dry-run }}
           TRIGGER_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
           ref="${INPUT_REF:-$TRIGGER_REF}"
@@ -87,13 +95,19 @@ jobs:
           if [ "${INPUT_STAGE:-false}" = "true" ]; then
             mode="stage"
           fi
+          # A prerelease published through the GitHub Releases UI has no inputs to
+          # read, so its dist-tag defaults to next instead of latest.
+          dist_tag="${INPUT_DIST_TAG:-latest}"
+          if [ "$EVENT_NAME" = "release" ] && [ "${RELEASE_PRERELEASE:-false}" = "true" ]; then
+            dist_tag="next"
+          fi
           {
             echo "ref=$ref"
-            echo "dist-tag=${INPUT_DIST_TAG:-latest}"
+            echo "dist-tag=$dist_tag"
             echo "mode=$mode"
             echo "dry-run=${INPUT_DRY_RUN:-false}"
           } >> "$GITHUB_OUTPUT"
-          echo "Resolved ref=$ref mode=$mode dist-tag=${INPUT_DIST_TAG:-latest} dry-run=${INPUT_DRY_RUN:-false}"
+          echo "Resolved ref=$ref mode=$mode dist-tag=$dist_tag dry-run=${INPUT_DRY_RUN:-false}"
 
       - uses: actions/checkout@v7
         with:
