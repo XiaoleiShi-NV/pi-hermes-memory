@@ -12,6 +12,8 @@ import {
   detectAuthAdapterExtensionPaths,
   execChildPrompt,
   inheritedExtensionArgs,
+  isMemoryChildProcess,
+  MEMORY_CHILD_ENV_VAR,
   resolveChildPiInvocation,
   resolveWatchedChildPiInvocation,
 } from "../../src/handlers/pi-child-process.js";
@@ -29,8 +31,8 @@ const OWN_EXTENSION_PATH = path.resolve(
   "../../src/index.ts",
 );
 
-// The child tool allowlist every argv shape must carry (#275).
-const TOOL_ARGS = ["--tools", MEMORY_WRITE_TOOL_NAMES.join(",")];
+// Every child argv shape must carry these tool flags (#275).
+const TOOL_ARGS = ["--tools", MEMORY_WRITE_TOOL_NAMES.join(","), "--exclude-tools", "mcp__*"];
 
 // Adapter detection scans the real sibling/agent node_modules trees, so a
 // contributor with a provider auth adapter installed gets extra -e args in
@@ -52,6 +54,17 @@ describe("inheritedExtensionArgs", () => {
       inheritedExtensionArgs(["--extension=src/index.ts"]),
       ["--extension=src/index.ts"],
     );
+  });
+});
+
+describe("isMemoryChildProcess", () => {
+  it("is true when the watchdog marker is 1", () => {
+    assert.strictEqual(isMemoryChildProcess({ [MEMORY_CHILD_ENV_VAR]: "1" }), true);
+  });
+
+  it("is false when the marker is missing or 0", () => {
+    assert.strictEqual(isMemoryChildProcess({}), false);
+    assert.strictEqual(isMemoryChildProcess({ [MEMORY_CHILD_ENV_VAR]: "0" }), false);
   });
 });
 
@@ -548,6 +561,30 @@ describe("execChildPrompt", () => {
     assert.ok(Date.now() - startedAt < 3000, "watchdog must enforce a bounded hard stop");
   });
 
+  it("marks the watched child with the memory child env marker", async () => {
+    const watchdogPath = fileURLToPath(
+      new URL("../../src/handlers/child-process-watchdog.mjs", import.meta.url),
+    );
+    // The probe runs in a separate node process, so the constant's value is inlined as a literal.
+    const probe = `process.stdout.write(process.env[${JSON.stringify(MEMORY_CHILD_ENV_VAR)}] ?? "")`;
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        watchdogPath,
+        "10000",
+        "-",
+        process.execPath,
+        "-e",
+        probe,
+      ], { stdio: ["ignore", "pipe", "ignore"] });
+      let output = "";
+      child.stdout.on("data", (chunk) => { output += chunk.toString(); });
+      child.on("error", reject);
+      child.on("close", () => resolve(output));
+    });
+
+    assert.equal(stdout, "1");
+  });
+
   it("terminates the child tree when its cancellation marker appears", async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "pi-watchdog-cancel-"));
     const cancelPath = path.join(directory, "cancel");
@@ -922,10 +959,14 @@ describe("execChildPrompt", () => {
 
     const expectedAllowlist = MEMORY_WRITE_TOOL_NAMES.join(",");
 
-    const assertExactlyOnce = (args: string[]): void => {
-      const flagIndexes = args.reduce<number[]>((acc, arg, i) => (arg === "--tools" ? [...acc, i] : acc), []);
-      assert.strictEqual(flagIndexes.length, 1, `--tools should appear exactly once, got ${flagIndexes.length}`);
-      assert.strictEqual(args[flagIndexes[0] + 1], expectedAllowlist);
+    const assertFlagOnce = (args: string[], flag: string, value: string): void => {
+      const flagIndexes = args.reduce<number[]>((acc, arg, i) => (arg === flag ? [...acc, i] : acc), []);
+      assert.strictEqual(flagIndexes.length, 1, `${flag} should appear exactly once, got ${flagIndexes.length}`);
+      assert.strictEqual(args[flagIndexes[0] + 1], value);
+    };
+    const assertToolFlags = (args: string[]): void => {
+      assertFlagOnce(args, "--tools", expectedAllowlist);
+      assertFlagOnce(args, "--exclude-tools", "mcp__*");
     };
 
     // All primary-builder shapes.
@@ -934,7 +975,7 @@ describe("execChildPrompt", () => {
       buildChildPiPromptArgs("p", { llmModelOverride: "openrouter/deepseek/deepseek-v4-flash", llmThinkingOverride: "off" }, []),
       buildChildPiPromptArgs("p", {}, [], { provider: "local-llama", id: "local-9b" }),
     ]) {
-      assertExactlyOnce(shape);
+      assertToolFlags(shape);
     }
 
     // Primary attempt fails on model resolution → retry builder drops the
@@ -944,8 +985,8 @@ describe("execChildPrompt", () => {
     }, { timeoutMs: 30000, retryWithoutOverrides: true });
 
     assert.strictEqual(calls.length, 2, "override failure should retry once");
-    assertExactlyOnce(calls[0]);
-    assertExactlyOnce(calls[1]);
+    assertToolFlags(calls[0]);
+    assertToolFlags(calls[1]);
   });
 });
 

@@ -796,15 +796,19 @@ describe("setupBackgroundReview", () => {
     assert.deepStrictEqual(logicalChildArgs(0).slice(0, 5), [
       "-p", "--no-session", "--model", "local-llama/local-9b", "--no-extensions",
     ]);
-    // The subprocess fallback is the exact path #275 closed: the child must
-    // carry the memory-tool allowlist exactly once, with no other tool flag.
+    // Regression guard for #275. pi keeps the last --tools or --exclude-tools
+    // it parses, so a duplicate would silently replace the earlier value.
     const fallbackArgs = logicalChildArgs(0);
     assert.strictEqual(fallbackArgs.filter((arg) => arg === "--tools").length, 1);
     assert.strictEqual(
       fallbackArgs[fallbackArgs.indexOf("--tools") + 1],
       MEMORY_WRITE_TOOL_NAMES.join(","),
     );
-    assert.strictEqual(fallbackArgs.includes("--exclude-tools"), false);
+    assert.strictEqual(fallbackArgs.filter((arg) => arg === "--exclude-tools").length, 1);
+    assert.strictEqual(
+      fallbackArgs[fallbackArgs.indexOf("--exclude-tools") + 1],
+      "mcp__*",
+    );
     assert.deepStrictEqual(execCalls[0][2], {
       cwd: "/tmp/local-session",
       timeout: 125000,

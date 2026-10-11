@@ -59,7 +59,7 @@ describe("llmThinkingOverride max", () => {
   it("forwards llmThinkingOverride max as --thinking max", () => {
     assert.deepStrictEqual(
       buildChildPiPromptArgs("hello", { llmThinkingOverride: "max" }, []),
-      ["-p", "--no-session", "--thinking", "max", ...EXT_ARGS, "--tools", MEMORY_WRITE_TOOL_NAMES.join(","), "hello"],
+      ["-p", "--no-session", "--thinking", "max", ...EXT_ARGS, "--tools", MEMORY_WRITE_TOOL_NAMES.join(","), "--exclude-tools", "mcp__*", "hello"],
     );
   });
 });
