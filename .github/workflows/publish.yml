@@ -73,6 +73,7 @@ jobs:
       dist-tag: ${{ steps.resolve.outputs.dist-tag }}
       mode: ${{ steps.resolve.outputs.mode }}
       dry-run: ${{ steps.resolve.outputs.dry-run }}
+      already-published: ${{ steps.version.outputs.already-published }}
     steps:
       - name: Resolve target ref and mode
         id: resolve
@@ -155,11 +156,17 @@ jobs:
               ;;
           esac
 
+          # Already on npm is not a failure: it means another trigger for this
+          # same version got there first (a release and its tag push both fire),
+          # or this is a re-run. Skip publishing and carry on, so the rest of the
+          # pipeline — notably a missing GitHub Release — still gets completed.
           if npm view "pi-hermes-memory@$version" version >/dev/null 2>&1; then
-            echo "::error::pi-hermes-memory@$version is already on npm. Nothing to publish."
-            exit 1
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::pi-hermes-memory@$version is already on npm — skipping the publish step. The GitHub Release is still reconciled."
+          else
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+            echo "npm has no pi-hermes-memory@$version yet."
           fi
-          echo "npm has no pi-hermes-memory@$version yet."
 
       - run: npm ci
 
@@ -186,6 +193,9 @@ jobs:
   publish:
     name: Publish to npm
     needs: verify
+    # Skipped when npm already has this version (a second trigger fired, or this
+    # is a re-run) — the release job below can still reconcile a missing Release.
+    if: needs.verify.outputs.already-published != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The npm trusted publisher may be scoped to this environment. It is also
@@ -223,7 +233,13 @@ jobs:
   release:
     name: GitHub Release
     needs: [verify, publish]
-    if: needs.verify.outputs.dry-run != 'true' && needs.verify.outputs.mode == 'publish'
+    # always() so a skipped publish job (version already on npm) does not skip
+    # the Release reconciliation too; the result check keeps failures out.
+    if: |
+      always() &&
+      needs.verify.result == 'success' &&
+      needs.verify.outputs.mode == 'publish' &&
+      needs.verify.outputs.dry-run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

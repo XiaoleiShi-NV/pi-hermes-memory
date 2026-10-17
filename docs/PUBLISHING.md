@@ -18,7 +18,7 @@ Runs against the exact commit being published:
 1. Resolves the target ref (tag, branch or SHA) and the publish mode.
 2. Fails if a `v*` ref does not name exactly the `package.json` version.
 3. Fails if the version is a prerelease published under `latest`.
-4. Fails if `pi-hermes-memory@<version>` already exists on npm.
+4. Marks the version `already-published` if npm has it — **not** a failure: publishing is skipped and the rest of the pipeline still runs, so a re-run (or the second of two triggers) reconciles a missing GitHub Release instead of dying.
 5. `npm ci`, `npm run check` (tsc), `npm test` (732 tests), `npm run check:production` (packs the tarball, installs it without peers, loads it through Pi's jiti loader and runs four loopback completions).
 6. Warns if `CHANGELOG.md` has no section for the version.
 
@@ -100,7 +100,8 @@ Publishing a GitHub Release also starts the pipeline (`release: types: [publishe
 
 Both orderings are safe to combine, because the pipeline is idempotent:
 
-- Whichever signal arrives second cannot double-publish — `verify` stops on an already-published version.
+- Whichever signal arrives second finds the version already on npm: publishing is skipped, the run stays green, and no second publish happens even in principle — npm rejects re-publishing a version regardless.
+- Creating a release for a **new** tag emits both a `release` and a `push` event, so expect two runs for that flow. One publishes; the other is the no-op described above.
 - A release you wrote by hand keeps its own notes: the `release` job finds it and leaves it untouched rather than overwriting it with the `CHANGELOG.md` section.
 - A release created by our own workflow uses `GITHUB_TOKEN`, which cascades nothing, so it cannot re-trigger this workflow.
 
@@ -125,9 +126,10 @@ Version `0.10.0-beta.1` plus `dist-tag: next`. A prerelease with `latest` is rej
 |Symptom|Action|
 |---|---|
 |`verify` failed|Fix on `main`, then re-dispatch `publish.yml` with the same `ref`|
-|`publish` failed after `verify` passed|Re-dispatch `publish.yml`; re-running `npm publish` for a version already on npm is blocked by the gate|
-|Package published, GitHub Release failed|Re-dispatch `publish.yml` — the version check will stop the publish step, so create the release by hand: `gh release create v<version> --verify-tag --notes-file <(...)`|
+|`publish` failed after `verify` passed|Re-dispatch `publish.yml` with the same `ref`; if the version did land, the publish step is skipped and the run still finishes green|
+|Package published, GitHub Release missing|Re-dispatch `publish.yml` with the same `ref` — publishing is skipped and the Release is created from the `CHANGELOG.md` section|
 |Bumped and tagged, but publish failed|The tag exists; re-dispatch `publish.yml` with `ref: v<version>`|
+|Two runs for one release|Expected when a release creates its own tag (both `release` and `push` fire): one publishes, the other is a no-op|
 |`403` from npm on publish|The trusted publisher is missing or does not allow `npm publish` — see [One-time setup](#one-time-setup-the-npm-trusted-publisher)|
 
 ## Runners
