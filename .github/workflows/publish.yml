@@ -1,10 +1,11 @@
 name: Publish to npm
 
-# Four entry points, all converging on the same jobs:
+# Three entry points, all converging on the same jobs:
 #   * push a version tag (v0.9.11)  — tag-first release
 #   * publish a GitHub Release      — release-first release (npm's documented pattern)
-#   * workflow_dispatch             — re-run, backport, dry-run, staged publish
-#   * workflow_call                 — used by "Prepare release" so a release is one dispatch
+#   * workflow_dispatch             — re-run, backport, dry-run, staged publish; also fired
+#                                     by "Prepare release" (npm validates the top-level
+#                                     workflow, so this file must never be a workflow_call)
 #
 # A Release created by this workflow's own `release` job uses GITHUB_TOKEN, which
 # cascades nothing, so the `release` trigger cannot re-enter itself.
@@ -33,27 +34,6 @@ on:
       dry-run:
         description: "Run the full gate and npm publish --dry-run. Nothing reaches the registry."
         required: true
-        default: false
-        type: boolean
-  workflow_call:
-    inputs:
-      ref:
-        description: "Tag, branch or commit SHA to publish."
-        required: true
-        type: string
-      dist-tag:
-        description: "npm dist-tag to publish under."
-        required: false
-        default: latest
-        type: string
-      stage:
-        description: "Stage for approval instead of publishing directly."
-        required: false
-        default: false
-        type: boolean
-      dry-run:
-        description: "Run the full gate without publishing."
-        required: false
         default: false
         type: boolean
 
@@ -234,10 +214,11 @@ jobs:
     name: GitHub Release
     needs: [verify, publish]
     # always() so a skipped publish job (version already on npm) does not skip
-    # the Release reconciliation too; the result check keeps failures out.
+    # the Release reconciliation too. A failed publish must NOT produce a Release.
     if: |
       always() &&
       needs.verify.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped') &&
       needs.verify.outputs.mode == 'publish' &&
       needs.verify.outputs.dry-run != 'true'
     runs-on: ubuntu-latest

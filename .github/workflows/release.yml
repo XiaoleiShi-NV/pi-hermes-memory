@@ -1,9 +1,9 @@
 name: Prepare release
 
 # One dispatch to cut a release: bump package.json, promote the CHANGELOG's
-# [Unreleased] section, commit to main, push the version tag, then hand off to
-# the publish pipeline (called directly — a tag pushed with GITHUB_TOKEN would
-# not trigger a separate run).
+# [Unreleased] section, commit to main, push the version tag, then dispatch
+# publish.yml (a tag pushed with GITHUB_TOKEN triggers nothing, and a
+# workflow_call would make npm validate release.yml instead of publish.yml).
 #
 # Requires the [Unreleased] section to describe the release. Run with
 # dry-run first to see the computed version and the changelog check.
@@ -36,7 +36,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 concurrency:
   group: prepare-release
@@ -155,12 +154,24 @@ jobs:
           echo "Pushed v$VERSION ($(git rev-parse HEAD))"
 
   publish:
-    name: Publish ${{ needs.prepare.outputs.version }}
+    name: Dispatch publish ${{ needs.prepare.outputs.version }}
     needs: prepare
     if: ${{ !inputs.dry-run }}
-    uses: ./.github/workflows/publish.yml
-    with:
-      ref: v${{ needs.prepare.outputs.version }}
-      dist-tag: ${{ inputs.dist-tag }}
-      stage: false
-      dry-run: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      # Dispatch instead of workflow_call: npm validates the trusted publisher
+      # against the top-level workflow, which must be publish.yml. GITHUB_TOKEN
+      # may dispatch workflows even though it cannot trigger push events.
+      - name: Dispatch publish.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIST_TAG: ${{ inputs.dist-tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f ref="v$VERSION" -f dist-tag="$DIST_TAG" -f stage=false -f dry-run=false
+          echo "Dispatched publish.yml for v$VERSION — follow it under Actions → Publish to npm."

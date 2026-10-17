@@ -6,8 +6,8 @@
 
 |Workflow|Trigger|Job|
 |---|---|---|
-|`publish.yml`|push of a `v*` tag, publishing a GitHub Release, `workflow_dispatch`, or a call from `release.yml`|verify → publish to npm → GitHub Release|
-|`release.yml`|`workflow_dispatch`|bump `package.json`, promote `CHANGELOG.md`, commit to `main`, push the tag, then call `publish.yml`|
+|`publish.yml`|push of a `v*` tag, publishing a GitHub Release, `workflow_dispatch`, or a dispatch fired by `release.yml`|verify → publish to npm → GitHub Release|
+|`release.yml`|`workflow_dispatch`|bump `package.json`, promote `CHANGELOG.md`, commit to `main`, push the tag, then dispatch `publish.yml`|
 
 Both run on `ubuntu-latest`. See [Runners](#runners) for why.
 
@@ -77,7 +77,7 @@ No repository secret is required. (`secrets.NPM_TOKEN` never existed — its abs
 - `dist-tag`: `latest`, or `next` for a prerelease
 - `dry-run`: `true` prints the computed version and validates the changelog without committing anything
 
-It then bumps `package.json`, moves everything under `## [Unreleased]` into `## [<version>] - <date>`, commits `chore(release): v<version>` to `main`, pushes the tag, and calls `publish.yml` with that tag — one workflow run, no cascading triggers.
+It then bumps `package.json`, moves everything under `## [Unreleased]` into `## [<version>] - <date>`, commits `chore(release): v<version>` to `main`, pushes the tag, and dispatches `publish.yml` with that tag. It is a dispatch, not a reusable-workflow call, because npm validates the trusted publisher against the top-level workflow — which must be `publish.yml`.
 
 Write the `[Unreleased]` section before dispatching; it becomes the release notes verbatim. The promotion never rewrites the prose.
 
